@@ -1,5 +1,5 @@
 // BIBLIOTECAS NECESSÁRIAS
-#include <EmonLib.h>		// Emon Library : cálculos para os sensores.
+#include <EmonLib.h>		// Emon Libraara os sensores.
 #include <SPI.h>				// SPI Library : necessária para o Shield Ethernet.
 #include <Ethernet.h>		// Ethernet Library : para o comunicação com a nuvem.
 
@@ -7,20 +7,31 @@
 EnergyMonitor emon1;		// Uma instância de um monitor de energial da Emon Library.
 const int CT_PIN = 1;		// Pino onde está conectado o sinal do sensor de corrente.
 
-byte ip[]   = {192,168,  0,101};                      // ip address (if dhcp not used)
-byte gw[]   = {192,168,  0,  1};                      // gateway address
+byte ip[]   = {192,168,  1,101};                      // ip address (if dhcp not used)
+byte gw[]   = {192,168,  1,  1};                      // gateway address
 byte ns[]   = {  8,  8,  8,  8};                      // name server address
 byte sub[]  = {255,255,255,  0};                      // network mask
 byte mac[]  = { 0x90, 0xA2, 0xDA, 0x0E, 0x04, 0x21 }; // Endereço MAC do Shield Ethernet (olhe atrás dele).
 EthernetClient client;		// Uma instância de um cliente TCP (usaremos eles para enviar os dados).
 
+//Emoncms configurations
+//char server[] = "emoncms.org";      // name address for emoncms.org
+// OR 
+IPAddress server(80, 243, 190, 58);  // numeric IP for emoncms.org (no DNS)
+
+  String apikey = "0fc3340c4434a7d42986e83fe2745e01";  //api key  emoncms.org
+  int node = 1; //if 0, not used
+
+unsigned long lastConnectionTime = 0;          // last time you connected to the server, in milliseconds
+boolean lastConnected = false;                 // state of the connection last time through the main loop
+const unsigned long postingInterval = 5*1000;  // delay between updates, in milliseconds
 
 void setup()
 { 
   delay(10000);
 	// Prepara a porta serial para ser utilizada para depuração. 
   Serial.begin(9600);
-  Serial.println("\n\nVamos lá Campus Party Brasil 2014!!");
+  Serial.println("Emoncms Cliente Inicializando");
 
   // Inicializa o monitor de energia.
   emon1.current(CT_PIN, 64);		// Calibração do sensor (deveria ser 111.1 para o SCT-013-100).
@@ -44,43 +55,44 @@ void setup()
 	Serial.println("Iniciando medições: \n");
 }
 
-// Envia dados para servidor.
-void sendData(double Irms, double Potencia) {
-  
-  client.connect("192.168.0.100",4000);	// Conecta no servidor na porta 80 (vamos usar http).
-  delay(500);
-  
-  if (client.connected()) {
-    client.print("GET /medida?");
-    client.print("irms=");
-    client.print(Irms);
-    client.print("&potencia=");
-    client.print(Potencia);
-    client.println(" HTTP/1.1");
-    client.println("Host: 192.168.0.100");
-    client.println();
-    delay(500);
-
-
-    while (client.available()) {
-      char c = client.read();
+// this method makes a HTTP connection to the server:
+void sendData() {
+         Serial.println("toti");
+  // if there's a successful connection:
+  if (client.connect(server, 80)) {
+    Serial.println("Connecting...");
+    // send the HTTP GET request:
+    client.print("GET /emoncms/input/post?apikey=");
+    client.print(apikey);
+    if (node > 0) {
+      client.print("&node=");
+      client.print(node);
     }
+    client.print("&json={");
+    client.print("light:");
+    client.print(lightValue);
+    client.println("} HTTP/1.1");
+    client.println("Host:emoncms.org");
+    client.println("User-Agent: Arduino-ethernet");
+    client.println("Connection: close");
+    client.println();
 
-    delay(100);
+    // note the time that the connection was made:
+    lastConnectionTime = millis();
+  } 
+  else {
+    // if you couldn't make a connection:
+    Serial.println("Connection failed");
+    Serial.println("Disconnecting...");
     client.stop();
-    Serial.println("Dados enviados!");
-  } else {
-    Serial.println("Falha na conexão.");
   }
-}
-
-
+  
 void loop()
 {
 	// Mede a corrente usando a biblioteca EmonLib e calcula potência.
 	// Imprime dados na serial para depuração.
   double Irms = emon1.calcIrms(1480);  // Mede a corrente RMS.
-  double Potencia = Irms * 127.0;		// Calcula a potência aparente (supondo que a rede elétrica esteja em 127 V).
+  double Potencia = Irms * 127.0;		// Calcula a potência aparente (supondo que a rede elétrica esteja em 127 V). isto ocasiona em uma margem de erro de até 20% na leitura
   Serial.print("Irms: ");
   Serial.print(Irms);		// Imprime a corrente na serial.
   Serial.print(" A \t");
@@ -89,8 +101,7 @@ void loop()
   Serial.print(" W");
   Serial.println();
 
-  // Envia dados para o servidor.
-  sendData(Irms, Potencia);
+  
 
   // Aguarde 10 segundos e siga em frente.
   delay(2000);
